@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Broadcast stream</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #0f0f12;
+      color: #e4e4e7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1rem; }
+    .card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 420px;
+      width: 100%;
+    }
+    .preview {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #27272a;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+    .preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .preview.off { display: flex; align-items: center; justify-content: center; color: #71717a; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      background: #27272a;
+      color: #e4e4e7;
+      font-size: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    input::placeholder { color: #71717a; }
+    button {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-start { background: #22c55e; color: #fff; }
+    .btn-start:hover { background: #16a34a; }
+    .btn-stop { background: #ef4444; color: #fff; }
+    .btn-stop:hover { background: #dc2626; }
+    .status { margin-top: 0.75rem; font-size: 0.875rem; color: #a1a1aa; }
+    .status.live { color: #22c55e; }
+    .status.err { color: #f87171; }
+    .status.waiting { color: #eab308; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Broadcast stream</h1>
+    <div class="preview off" id="preview">Allow camera to start</div>
+    <input type="text" id="streamId" placeholder="Stream ID (e.g. my-stream)" autocomplete="off" />
+    <input type="password" id="password" placeholder="Stream password" autocomplete="current-password" />
+    <button class="btn-start" id="btnStart">Start streaming</button>
+    <button class="btn-stop" id="btnStop" style="display:none">Stop streaming</button>
+    <p class="status" id="status"></p>
+  </div>
+  <script>
+    const preview = document.getElementById('preview');
+    const streamIdInput = document.getElementById('streamId');
+    const password = document.getElementById('password');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const status = document.getElementById('status');
+
+    let stream = null;
+    let ws = null;
+    let raf = null;
+    let video = null;
+    let canvas = null;
+    let wasLive = false;
+    const FPS = 12;
+
+    function setStatus(text, cls = '') {
+      status.textContent = text;
+      status.className = 'status ' + cls;
+    }
+
+    async function startBroadcast() {
+      wasLive = false;
+      const id = streamIdInput.value.trim();
+      const pwd = password.value;
+      if (!id) {
+        setStatus('Enter a stream ID (e.g. my-stream).', 'err');
+        return;
+      }
+      if (!pwd) {
+        setStatus('Enter the stream password.', 'err');
+        return;
+      }
+      if (!stream) {
+        setStatus('Starting camera…');
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } catch (e) {
+          setStatus('Camera error: ' + (e.message || 'denied'), 'err');
+          return;
+        }
+        preview.classList.remove('off');
+        preview.innerHTML = '<video id="vid" muted playsinline autoplay></video>';
+        video = document.getElementById('vid');
+        video.srcObject = stream;
+        canvas = document.createElement('canvas');
+      }
+
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = protocol + '//' + location.host;
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        setStatus('Connecting…', 'waiting');
+        ws.send(JSON.stringify({ type: 'auth', streamId: id, password: pwd, role: 'broadcast' }));
+      };
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          let msg;
+          try { msg = JSON.parse(e.data); } catch (_) { return; }
+          if (msg.type === 'auth' && msg.ok) {
+            wasLive = true;
+            btnStart.style.display = 'none';
+            btnStop.style.display = 'block';
+            setStatus('Live — share stream ID and password with viewers.', 'live');
+            startSendingFrames();
+            return;
+          }
+          if (msg.type === 'auth' && !msg.ok) {
+            setStatus(msg.error || 'Invalid password', 'err');
+            ws.close();
+            return;
+          }
+          if (msg.type === 'stream_status') {
+            if (msg.status === 'live') setStatus('Live — share stream ID and password with viewers.', 'live');
+            return;
+          }
+        }
+      };
+      ws.onerror = () => setStatus('Connection error', 'err');
+      ws.onclose = () => {
+        stopSendingFrames();
+        if (wasLive) setStatus('Disconnected');
+        wasLive = false;
+        btnStart.style.display = 'block';
+        btnStop.style.display = 'none';
+      };
+    }
+
+    function startSendingFrames() {
+      if (!ws || ws.readyState !== WebSocket.OPEN || !video || !canvas) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      let last = 0;
+      function tick(now) {
+        raf = requestAnimationFrame(tick);
+        if (now - last < 1000 / FPS) return;
+        last = now;
+        if (video.readyState < 2) return;
+        ctx.drawImage(video, 0, 0);
+        canvas.toBlob((blob) => {
+          if (ws && ws.readyState === WebSocket.OPEN && blob) ws.send(blob);
+        }, 'image/jpeg', 0.7);
+      }
+      raf = requestAnimationFrame(tick);
+    }
+
+    function stopSendingFrames() {
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+    }
+
+    function stopBroadcast() {
+      wasLive = false;
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      stopSendingFrames();
+      btnStart.style.display = 'block';
+      btnStop.style.display = 'none';
+      setStatus('Disconnected');
+    }
+
+    btnStart.addEventListener('click', startBroadcast);
+    btnStop.addEventListener('click', stopBroadcast);
+  </script>
+</body>
+</html>

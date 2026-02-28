@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Watch stream</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #0f0f12;
+      color: #e4e4e7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 1rem; }
+    .card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 560px;
+      width: 100%;
+    }
+    .viewer {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #27272a;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .viewer img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .viewer.placeholder { color: #71717a; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      background: #27272a;
+      color: #e4e4e7;
+      font-size: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    input::placeholder { color: #71717a; }
+    button {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      background: #3b82f6;
+      color: #fff;
+    }
+    button:hover { background: #2563eb; }
+    .status { margin-top: 0.75rem; font-size: 0.875rem; color: #a1a1aa; }
+    .status.live { color: #22c55e; }
+    .status.err { color: #f87171; }
+    .status.waiting { color: #eab308; }
+    .form { display: block; }
+    .form.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Watch stream</h1>
+    <div class="viewer placeholder" id="viewer">Enter stream ID and password to connect</div>
+    <div class="form" id="form">
+      <input type="text" id="streamId" placeholder="Stream ID" autocomplete="off" />
+      <input type="password" id="password" placeholder="Stream password" autocomplete="current-password" />
+      <button id="btnConnect">Connect</button>
+    </div>
+    <p class="status" id="status"></p>
+  </div>
+  <script>
+    const viewer = document.getElementById('viewer');
+    const form = document.getElementById('form');
+    const streamIdInput = document.getElementById('streamId');
+    const password = document.getElementById('password');
+    const btnConnect = document.getElementById('btnConnect');
+    const status = document.getElementById('status');
+
+    let ws = null;
+    let img = null;
+    let wasConnected = false;
+
+    function setStatus(text, cls = '') {
+      status.textContent = text;
+      status.className = 'status ' + cls;
+    }
+
+    function connect() {
+      const id = streamIdInput.value.trim();
+      const pwd = password.value;
+      if (!id) {
+        setStatus('Enter the stream ID.', 'err');
+        return;
+      }
+      if (!pwd) {
+        setStatus('Enter the stream password.', 'err');
+        return;
+      }
+
+      setStatus('Connecting…', 'waiting');
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = protocol + '//' + location.host;
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', streamId: id, password: pwd, role: 'watch' }));
+      };
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          let msg;
+          try { msg = JSON.parse(e.data); } catch (_) { return; }
+          if (msg.type === 'auth' && msg.ok) {
+            wasConnected = true;
+            form.classList.add('hidden');
+            viewer.classList.remove('placeholder');
+            viewer.innerHTML = '';
+            img = document.createElement('img');
+            img.alt = 'Live stream';
+            viewer.appendChild(img);
+            setStatus('Connected — waiting for stream…', 'waiting');
+            return;
+          }
+          if (msg.type === 'auth' && !msg.ok) {
+            setStatus(msg.error || 'Invalid stream ID or password', 'err');
+            ws.close();
+            return;
+          }
+          if (msg.type === 'stream_status') {
+            if (msg.status === 'live') setStatus('Live', 'live');
+            if (msg.status === 'waiting') setStatus('Connected — waiting for stream…', 'waiting');
+            if (msg.status === 'disconnected') setStatus('Stream ended', 'err');
+            return;
+          }
+          return;
+        }
+        if (e.data instanceof ArrayBuffer && img) {
+          const blob = new Blob([e.data], { type: 'image/jpeg' });
+          const prev = img.src;
+          img.src = URL.createObjectURL(blob);
+          if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+          setStatus('Live', 'live');
+        }
+      };
+      ws.onerror = () => setStatus('Connection error', 'err');
+      ws.onclose = () => {
+        form.classList.remove('hidden');
+        viewer.classList.add('placeholder');
+        viewer.innerHTML = 'Enter stream ID and password to connect';
+        img = null;
+        if (wasConnected) setStatus('Disconnected');
+        wasConnected = false;
+      };
+    }
+
+    btnConnect.addEventListener('click', connect);
+    streamIdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+    password.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+  </script>
+</body>
+</html>

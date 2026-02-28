@@ -1,0 +1,3 @@
+# Binary SQLite DB — open with a SQLite viewer, not as text
+data/
+*.db
