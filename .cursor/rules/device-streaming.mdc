@@ -1,0 +1,59 @@
+---
+description: How the device extension works and which microcontrollers are supported
+globs: server/device-extension.js,server/index.js,docs/DEVICE-API.md
+alwaysApply: false
+---
+
+# Device streaming – how it works
+
+## Purpose
+
+The **device extension** lets microcontrollers (no browser) stream video into this app using **HTTP** or **WebSocket**. Device streams use the same **streamId** and **password** as the web UI; viewers use the existing Watch page or WebSocket client. No separate “device” viewer path.
+
+## Server flow
+
+1. **Routes** live under `/api/device` and are mounted in `server/index.js` via `installDeviceExtension(app, injectFrame)`.
+2. **Optional register:** `POST /api/device/register` with `{ streamId, password }` pre-creates a stream in the DB. If the stream already exists, the password must match.
+3. **Frame ingestion:** `POST /api/device/stream/:streamId/frame` with raw binary body (e.g. JPEG), auth via `X-Stream-Password` or `Authorization: Bearer <password>`. If the stream does not exist, it is created with that password. The handler calls `injectFrame(streamId, body)`.
+4. **injectFrame** (in `server/index.js`): Ensures the stream entry exists in the in-memory `streams` Map, sets `latestFrame`, calls `setStreamActive(id, 1)`, and sends the buffer to all connected WebSocket viewers. Same pipeline as WebSocket broadcasters; device is just another source of frames.
+5. **Watching:** Unchanged. Users open the Watch page or connect via WebSocket with `role: 'watch'` and the same streamId/password.
+
+## Important implementation details
+
+- **Raw body for frames:** The device router uses `express.raw({ limit: '5mb', type: ... })` so `/frame` gets a `Buffer`; JSON is only parsed when Content-Type is `application/json` (for `/register`).
+- **Stream creation on first frame:** You can skip `/register` and POST a frame directly; the frame handler creates the stream with the given password if it doesn’t exist.
+- **No WebSocket on device required:** HTTP is enough. WebSocket is an alternative for devices that support it: connect, send auth `{ type: 'auth', streamId, password, role: 'broadcast' }`, then send binary frames.
+
+---
+
+# Supported microcontrollers and why
+
+Any device that can do **HTTP POST** (or WebSocket) over the network and send **binary frame data** (e.g. JPEG) can use this project.
+
+## Requirements
+
+- **Network:** WiFi or Ethernet (or other IP connectivity to the server).
+- **HTTP client:** Ability to POST to `http(s)://YOUR_SERVER/api/device/stream/:streamId/frame` with headers and a binary body, **or** a WebSocket client to connect and send auth + binary frames.
+- **Frames:** Capture or generate image data (typically JPEG) and send it as the request body or as WebSocket binary messages.
+
+## Recommended / commonly used
+
+| Platform | Why it works |
+|----------|----------------|
+| **ESP32-CAM** | Built-in camera, WiFi, Arduino ecosystem. Use `HTTPClient` or `WiFiClient` to POST each JPEG from `camera_fb_t->buf`. Very common for low-cost camera streaming. |
+| **Raspberry Pi** | Full Linux, WiFi/Ethernet, Python or any language. Use `requests.post(url, data=jpeg_bytes, headers={...})` or `urllib.request`. Can use USB or CSI cameras and encode to JPEG. |
+| **Arduino + Ethernet/WiFi shield** | Can build HTTP requests manually or use a small HTTP library. Good for wired Ethernet or WiFi boards (e.g. Arduino Uno + Ethernet Shield, or ESP8266/ESP32). |
+| **ESP8266 / ESP32** | WiFi, HTTP client libraries, enough RAM to hold and send small JPEGs (ESP32-CAM is the camera variant). |
+| **Other Linux SBCs** (e.g. Orange Pi, BeagleBone) | Same idea as Raspberry Pi: run a small script that captures frames and POSTs them. |
+
+## Why HTTP (device API) exists
+
+Many microcontrollers have limited or no WebSocket support, but can do HTTP easily. The device extension adds a simple REST API so those devices only need to POST one frame per request with a password header. The server then feeds those frames into the same in-memory stream and WebSocket viewer pipeline, so behavior is identical to a browser broadcaster.
+
+## When editing device code
+
+- Keep **streamId** lowercase, 1–64 chars.
+- Send **Content-Type: image/jpeg** (or appropriate type) for frame POSTs.
+- Auth: **X-Stream-Password** or **Authorization: Bearer &lt;password&gt;**.
+- Max body size per frame request: **~5 MB** (server limit in `device-extension.js`).
+- Reference: `docs/DEVICE-API.md` for curl examples and WebSocket option.

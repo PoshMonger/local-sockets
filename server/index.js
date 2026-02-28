@@ -15,6 +15,7 @@ import {
   hashPassword,
   verifyPassword,
 } from './db.js';
+import { installDeviceExtension } from './device-extension.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3080;
@@ -166,12 +167,29 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Device extension: allow microcontrollers to push frames via HTTP (no change to existing logic)
+function injectFrame(streamId, buffer) {
+  const id = String(streamId).trim().toLowerCase();
+  if (!id) return;
+  if (!streams.has(id)) {
+    streams.set(id, { broadcaster: null, viewers: new Set(), latestFrame: null, sessionId: null });
+  }
+  const s = streams.get(id);
+  s.latestFrame = buffer;
+  setStreamActive(id, 1);
+  s.viewers.forEach((v) => {
+    if (v.readyState === 1) v.send(buffer, { binary: true });
+  });
+}
+installDeviceExtension(app, injectFrame);
+
 async function main() {
   await ensureDb();
   server.listen(PORT, () => {
     console.log('Stream server http://localhost:' + PORT);
     console.log('  Broadcast: http://localhost:' + PORT + '/broadcast.html');
     console.log('  Watch:     http://localhost:' + PORT + '/watch.html');
+    console.log('  Device API: http://localhost:' + PORT + '/api/device/info');
   });
 }
 
