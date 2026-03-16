@@ -14,10 +14,18 @@
 #include <HTTPClient.h>
 #include "esp_camera.h"
 
-// ============ CONFIGURATION – edit these ============
-#define WIFI_SSID       "M45T3R0FN0N3"
-#define WIFI_PASSWORD   "stillBetterThanAMasterOfOne"
-#define SERVER_URL      "http://192.168.1.100:3080"  // Your server IP (not localhost!)
+// ============ CONFIGURATION ============
+// WIFI_SSID, WIFI_PASSWORD, SERVER_URL are injected from project root .env at build time
+// (see scripts/load_env.py). Define fallbacks only if .env is missing.
+#ifndef WIFI_SSID
+#define WIFI_SSID       "YOUR_WIFI_SSID"
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
+#endif
+#ifndef SERVER_URL
+#define SERVER_URL      "http://192.168.1.1:3080"
+#endif
 #define STREAM_ID       "esp32-cam-01"               // lowercase, 1–64 chars
 #define STREAM_PASSWORD "your-stream-password"
 
@@ -48,6 +56,50 @@ bool setupCamera() {
   camera_config_t config = {};
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_SVGA;   // 800x600 – reduce if bandwidth is tight (e.g. FRAMESIZE_VGA)
+  config.jpeg_quality = 12;             // 0–63, lower = better quality, larger
+  config.fb_count = 1;
+
+#if defined(CAMERA_MODEL_ESP32S3_EYE)
+  // Espressif ESP32-S3-EYE / ESP32-S3 Sense
+  config.pin_d0 = 11;
+  config.pin_d1 = 9;
+  config.pin_d2 = 8;
+  config.pin_d3 = 10;
+  config.pin_d4 = 12;
+  config.pin_d5 = 18;
+  config.pin_d6 = 17;
+  config.pin_d7 = 16;
+  config.pin_xclk = 15;
+  config.pin_pclk = 13;
+  config.pin_vsync = 6;
+  config.pin_href = 7;
+  config.pin_sscb_sda = 4;
+  config.pin_sscb_scl = 5;
+  config.pin_pwdn = -1;
+  config.pin_reset = -1;
+#elif defined(CAMERA_MODEL_XIAO_ESP32S3)
+  // Seeed XIAO ESP32S3 Sense
+  config.pin_d0 = 15;
+  config.pin_d1 = 17;
+  config.pin_d2 = 18;
+  config.pin_d3 = 16;
+  config.pin_d4 = 14;
+  config.pin_d5 = 12;
+  config.pin_d6 = 11;
+  config.pin_d7 = 48;
+  config.pin_xclk = 10;
+  config.pin_pclk = 13;
+  config.pin_vsync = 38;
+  config.pin_href = 47;
+  config.pin_sscb_sda = 40;
+  config.pin_sscb_scl = 39;
+  config.pin_pwdn = -1;
+  config.pin_reset = -1;
+#else
+  // AI-Thinker ESP32-CAM (default)
   config.pin_d0 = 5;
   config.pin_d1 = 18;
   config.pin_d2 = 19;
@@ -64,11 +116,7 @@ bool setupCamera() {
   config.pin_sscb_scl = 27;
   config.pin_pwdn = 32;
   config.pin_reset = -1;
-  config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_SVGA;   // 800x600 – reduce if bandwidth is tight (e.g. FRAMESIZE_VGA)
-  config.jpeg_quality = 12;             // 0–63, lower = better quality, larger
-  config.fb_count = 1;
+#endif
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
