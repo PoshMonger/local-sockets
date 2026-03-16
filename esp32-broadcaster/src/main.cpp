@@ -76,8 +76,8 @@ bool setupCamera() {
   config.pin_pclk = 13;
   config.pin_vsync = 6;
   config.pin_href = 7;
-  config.pin_sscb_sda = 4;
-  config.pin_sscb_scl = 5;
+  config.pin_sccb_sda = 4;
+  config.pin_sccb_scl = 5;
   config.pin_pwdn = -1;
   config.pin_reset = -1;
 #elif defined(CAMERA_MODEL_XIAO_ESP32S3)
@@ -94,8 +94,8 @@ bool setupCamera() {
   config.pin_pclk = 13;
   config.pin_vsync = 38;
   config.pin_href = 47;
-  config.pin_sscb_sda = 40;
-  config.pin_sscb_scl = 39;
+  config.pin_sccb_sda = 40;
+  config.pin_sccb_scl = 39;
   config.pin_pwdn = -1;
   config.pin_reset = -1;
 #else
@@ -112,8 +112,8 @@ bool setupCamera() {
   config.pin_pclk = 22;
   config.pin_vsync = 25;
   config.pin_href = 23;
-  config.pin_sscb_sda = 26;
-  config.pin_sscb_scl = 27;
+  config.pin_sccb_sda = 26;
+  config.pin_sccb_scl = 27;
   config.pin_pwdn = 32;
   config.pin_reset = -1;
 #endif
@@ -140,7 +140,7 @@ void sendFrame(const uint8_t* buf, size_t len) {
   http.begin(url);
   http.addHeader("Content-Type", "image/jpeg");
   http.addHeader("X-Stream-Password", STREAM_PASSWORD);
-  int code = http.POST(buf, len);
+  int code = http.POST((uint8_t*)buf, len);
   if (code == 204 || code == 200) {
     Serial.printf("Frame sent %u bytes -> %d\n", (unsigned)len, code);
   } else {

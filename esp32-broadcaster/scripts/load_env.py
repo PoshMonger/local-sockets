@@ -27,10 +27,10 @@ def load_dotenv(path):
                 out[key] = val
     return out
 
-# .env at project root (sockets-2.0/.env)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-env_path = os.path.join(project_root, "..", ".env")
-env_path = os.path.normpath(env_path)
+# .env at repo root: one level up from PROJECT_DIR (esp32-broadcaster -> sockets-2.0)
+# Use env["PROJECT_DIR"] because __file__ is not set when SCons exec's this script
+project_dir = env["PROJECT_DIR"]
+env_path = os.path.normpath(os.path.join(project_dir, "..", ".env"))
 vars = load_dotenv(env_path)
 
 wifi_ssid = vars.get("WIFI_NAME", "YOUR_WIFI_SSID")
