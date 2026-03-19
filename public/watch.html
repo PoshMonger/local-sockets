@@ -67,6 +67,7 @@
     .status.live { color: #22c55e; }
     .status.err { color: #f87171; }
     .status.waiting { color: #eab308; }
+    .status.inactive { color: #fb923c; }
     .form { display: block; }
     .form.hidden { display: none; }
   </style>
@@ -142,7 +143,16 @@
           }
           if (msg.type === 'stream_status') {
             if (msg.status === 'live') setStatus('Live', 'live');
-            if (msg.status === 'waiting') setStatus('Connected — waiting for stream…', 'waiting');
+            if (msg.status === 'waiting') {
+              if (msg.reason === 'device_stall') {
+                setStatus('Momentary interruption — waiting for frames…', 'waiting');
+              } else {
+                setStatus('Connected — waiting for stream…', 'waiting');
+              }
+            }
+            if (msg.status === 'inactive') {
+              setStatus('Broadcaster inactive — no frames for a while. Stream may resume.', 'inactive');
+            }
             if (msg.status === 'disconnected') setStatus('Stream ended', 'err');
             return;
           }

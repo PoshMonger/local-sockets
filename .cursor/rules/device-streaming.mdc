@@ -21,7 +21,8 @@ The **device extension** lets microcontrollers (no browser) stream video into th
 ## Important implementation details
 
 - **Raw body for frames:** The device router uses `express.raw({ limit: '5mb', type: ... })` so `/frame` gets a `Buffer`; JSON is only parsed when Content-Type is `application/json` (for `/register`).
-- **Performance:** `/frame` caches successful bcrypt verification per `(streamId + password)` (`DEVICE_AUTH_CACHE_MS`, default 6h). `injectFrame` throttles `setStreamActive` DB persistence (`DEVICE_ACTIVE_PERSIST_MS`, default 60s). Without this, every JPEG would trigger slow bcrypt + full SQLite file write.
+- **Performance:** `/frame` caches successful bcrypt verification per `(streamId + password)` (`DEVICE_AUTH_CACHE_MS`, default 6h). Without caching, every JPEG would trigger slow bcrypt + full SQLite file write on `setStreamActive`.
+- **Device inactivity:** If no WS broadcaster, `injectFrame` arms timers: after `DEVICE_WAIT_MS` (default 5s) viewers get `waiting` + `reason: device_stall`; after `DEVICE_INACTIVE_MS` (default 15s) DB `is_active=0`, device broadcast `sessions` row ended, viewers get `inactive`. New device segment starts a new broadcast session on next frame.
 - **Stream creation on first frame:** You can skip `/register` and POST a frame directly; the frame handler creates the stream with the given password if it doesn’t exist.
 - **No WebSocket on device required:** HTTP is enough. WebSocket is an alternative for devices that support it: connect, send auth `{ type: 'auth', streamId, password, role: 'broadcast' }`, then send binary frames.
 

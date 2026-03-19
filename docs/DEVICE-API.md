@@ -66,7 +66,14 @@ If the stream does not exist yet, it is created with the given password. Respons
 
 The server **does not** run bcrypt password verification on **every** frame (that would limit you to a few frames per second). After a successful check, auth is cached per `(streamId + password)` for several hours (default **6 hours**, override with env `DEVICE_AUTH_CACHE_MS` in milliseconds).
 
-The server also **throttles** SQLite writes for “stream active” state during device ingest (default **60s**, env `DEVICE_ACTIVE_PERSIST_MS`) so each JPEG does not rewrite the whole database file.
+### Device inactivity & sessions
+
+While no WebSocket broadcaster is connected, HTTP frame timing drives status:
+
+- **`DEVICE_WAIT_MS`** (default **5000**): no frame this long → watchers get `stream_status` `waiting` with `reason: device_stall` (momentary interruption).
+- **`DEVICE_INACTIVE_MS`** (default **15000**): no frame this long → `is_active` is set **0** in the DB, the device **broadcast** `sessions` row is **ended**, watchers get `stream_status` **`inactive`**.
+
+Each time frames resume after a full inactive period, a **new** broadcast session is started (same as a fresh device run). Env vars: `DEVICE_WAIT_MS`, `DEVICE_INACTIVE_MS`.
 
 **Example (curl):**
 
