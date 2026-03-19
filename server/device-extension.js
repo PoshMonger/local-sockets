@@ -3,15 +3,51 @@
  * to register streams and push video frames without using WebSockets.
  * Does not modify any existing behavior; only adds new routes and uses injectFrame to
  * feed frames into the same stream state as WebSocket broadcasters.
+ *
+ * Frame uploads must NOT run bcrypt.verify on every JPEG — bcrypt is intentionally slow
+ * (~50–200ms+), which caps throughput. We cache a successful verify per (streamId + password)
+ * for DEVICE_AUTH_CACHE_MS (override with env DEVICE_AUTH_CACHE_MS).
  */
 
 import express from 'express';
+import { createHash } from 'crypto';
 import {
   getStream,
   createStream,
   hashPassword,
   verifyPassword,
 } from './db.js';
+
+const DEVICE_AUTH_CACHE_MS = Number(process.env.DEVICE_AUTH_CACHE_MS) || 6 * 60 * 60 * 1000; // 6h
+
+/** @type {Map<string, number>} cacheKey -> expiresAt (ms since epoch) */
+const deviceAuthCache = new Map();
+
+function deviceAuthCacheKey(streamId, password) {
+  const h = createHash('sha256').update(password, 'utf8').digest('hex');
+  return `${streamId}:${h}`;
+}
+
+function isDeviceAuthCached(streamId, password) {
+  const key = deviceAuthCacheKey(streamId, password);
+  const exp = deviceAuthCache.get(key);
+  if (!exp || exp <= Date.now()) {
+    deviceAuthCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function setDeviceAuthCached(streamId, password) {
+  const key = deviceAuthCacheKey(streamId, password);
+  deviceAuthCache.set(key, Date.now() + DEVICE_AUTH_CACHE_MS);
+  if (deviceAuthCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of deviceAuthCache) {
+      if (v <= now) deviceAuthCache.delete(k);
+    }
+  }
+}
 
 /**
  * Mount device API routes on the existing Express app.
@@ -94,9 +130,12 @@ export function installDeviceExtension(app, injectFrame) {
         createStream(streamId, passwordHash);
         row = getStream(streamId);
       } else {
-        const valid = await verifyPassword(password, row.password_hash);
-        if (!valid) {
-          return res.status(401).json({ ok: false, error: 'Invalid password' });
+        if (!isDeviceAuthCached(streamId, password)) {
+          const valid = await verifyPassword(password, row.password_hash);
+          if (!valid) {
+            return res.status(401).json({ ok: false, error: 'Invalid password' });
+          }
+          setDeviceAuthCached(streamId, password);
         }
       }
 

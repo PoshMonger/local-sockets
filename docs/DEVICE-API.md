@@ -62,6 +62,12 @@ X-Stream-Password: your-secret
 
 If the stream does not exist yet, it is created with the given password. Response: **204 No Content** on success.
 
+### Performance (server)
+
+The server **does not** run bcrypt password verification on **every** frame (that would limit you to a few frames per second). After a successful check, auth is cached per `(streamId + password)` for several hours (default **6 hours**, override with env `DEVICE_AUTH_CACHE_MS` in milliseconds).
+
+The server also **throttles** SQLite writes for “stream active” state during device ingest (default **60s**, env `DEVICE_ACTIVE_PERSIST_MS`) so each JPEG does not rewrite the whole database file.
+
 **Example (curl):**
 
 ```bash

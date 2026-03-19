@@ -35,6 +35,13 @@
 
 static bool cameraOk = false;
 static unsigned long lastFrameTime = 0;
+static HTTPClient http;
+static bool httpPrepared = false;
+
+static void resetHttpClient() {
+  http.end();
+  httpPrepared = false;
+}
 
 void setupWiFi() {
   Serial.println();
@@ -58,8 +65,9 @@ bool setupCamera() {
   config.ledc_timer = LEDC_TIMER_0;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_SVGA;   // 800x600 – reduce if bandwidth is tight (e.g. FRAMESIZE_VGA)
-  config.jpeg_quality = 12;             // 0–63, lower = better quality, larger
+  // Smaller / more compressed JPEG = faster Wi‑Fi + HTTP POST (try VGA + quality 15–20 if choppy).
+  config.frame_size = FRAMESIZE_VGA;    // 640x480; use SVGA only if network is fast
+  config.jpeg_quality = 15;             // 0–63, higher = smaller files, faster uploads
   config.fb_count = 1;
 
 #if defined(CAMERA_MODEL_ESP32S3_EYE)
@@ -135,18 +143,28 @@ bool setupCamera() {
 void sendFrame(const uint8_t* buf, size_t len) {
   if (len == 0) return;
 
+  if (WiFi.status() != WL_CONNECTED) {
+    resetHttpClient();
+    return;
+  }
+
   String url = String(SERVER_URL) + "/api/device/stream/" + STREAM_ID + "/frame";
-  HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "image/jpeg");
-  http.addHeader("X-Stream-Password", STREAM_PASSWORD);
+  if (!httpPrepared) {
+    http.begin(url);
+    http.setReuse(true);  // keep TCP connection — avoids TLS-less but still costly TCP+HTTP setup every frame
+    http.setTimeout(15000);
+    http.addHeader("Content-Type", "image/jpeg");
+    http.addHeader("X-Stream-Password", STREAM_PASSWORD);
+    httpPrepared = true;
+  }
+
   int code = http.POST((uint8_t*)buf, len);
   if (code == 204 || code == 200) {
     Serial.printf("Frame sent %u bytes -> %d\n", (unsigned)len, code);
   } else {
     Serial.printf("Frame POST failed: %d %s\n", code, http.getString().c_str());
+    resetHttpClient();  // next frame opens a fresh connection
   }
-  http.end();
 }
 
 void setup() {

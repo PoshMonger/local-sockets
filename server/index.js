@@ -27,6 +27,10 @@ app.use(express.static(join(__dirname, '..', 'public')));
 // streamId -> { broadcaster: ws, viewers: Set(ws), latestFrame: Buffer, sessionId: number }
 const streams = new Map();
 
+// Avoid writing SQLite to disk on every device frame (injectFrame called at high rate).
+const deviceActivePersistAt = new Map();
+const DEVICE_ACTIVE_PERSIST_MS = Number(process.env.DEVICE_ACTIVE_PERSIST_MS) || 60_000;
+
 async function ensureDb() {
   try {
     await initDb();
@@ -176,7 +180,12 @@ function injectFrame(streamId, buffer) {
   }
   const s = streams.get(id);
   s.latestFrame = buffer;
-  setStreamActive(id, 1);
+  const now = Date.now();
+  const lastPersist = deviceActivePersistAt.get(id) ?? 0;
+  if (!deviceActivePersistAt.has(id) || now - lastPersist >= DEVICE_ACTIVE_PERSIST_MS) {
+    setStreamActive(id, 1);
+    deviceActivePersistAt.set(id, now);
+  }
   s.viewers.forEach((v) => {
     if (v.readyState === 1) v.send(buffer, { binary: true });
   });
